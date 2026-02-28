@@ -48,15 +48,6 @@ def calculate_eigenvalues_error(computed_eigenvalues, true_eigenvalues, N):
     """
     Calculate error between computed eigenvalues and true eigenvalues.
 
-    Args:
-        computed_eigenvalues: Computed eigenvalues matrix (diagonal matrix)
-        true_eigenvalues: True eigenvalues matrix (diagonal matrix)
-        N: Size of the original matrix
-
-    Returns:
-        max_eigenvalue_error: Maximum absolute error between corresponding eigenvalues
-        mean_eigenvalue_error: Mean absolute error between corresponding eigenvalues
-        relative_error: Relative error normalized by the norm of true eigenvalues
     """
     # Extract diagonal elements (eigenvalues)
     computed = np.diag(computed_eigenvalues)

@@ -5,32 +5,31 @@ from concurrent.futures import ThreadPoolExecutor
 from tools import *
 
 
-
 def bifunc_relative(mu_low, mu_high, origins, epsilon, w, bsquare, EA, itermax_vector, seq):
     """
-    使用 Gu-Eisenstat 停止准则在相对坐标系下求解久期方程。
+    solve the incremental rank-1 secular equation in relative coordinate system using Gu-Eisenstat stopping criterion.
 
-    参数:
-    - mu_low, mu_high: 每个特征值的搜索区间 [low, high] (相对于 origins).
-    - origins: 每个特征值的参考原点 (Shift). 真根 = origins[i] + mu[i].
-    - epsilon: 机器精度.
-    - w: 箭头矩阵的尖端元素 (alpha).
-    - bsquare: 箭杆元素的平方 (z_j^2).
-    - EA: 对角元素 (d_j).
-    - seq: 需要计算的特征值索引列表.
+    Parameters:
+    - mu_low, mu_high: Search intervals [low, high] for each eigenvalue (relative to origins).
+    - origins: Reference origins (Shift) for each eigenvalue. True root = origins[i] + mu[i].
+    - epsilon: Machine precision.
+    - w: Tip element of the arrowhead matrix (alpha).
+    - bsquare: Squared arrow elements (beta_j^2).
+    - EA: Diagonal elements.
+    - seq: List of eigenvalue indices to compute.
 
-    返回:
-    - mu_roots: 计算出的偏移量 mu.
+    Returns:
+    - mu_roots: Computed offsets mu.
     """
 
-    # 初始化结果数组
+    # Initialize result array
     N_roots = len(mu_low)
     mu_roots = np.zeros(N_roots)
 
-    # 设定误差界限参数 eta (tr932 建议 eta * N < 0.1)
-    # 这里取 conservative 值以保证稳定性
+    # Set error bound parameter eta (tr932 suggests eta * N < 0.1)
+    # Using conservative value for stability
     eta = epsilon
-    N = len(EA) + 1  # 矩阵总维度
+    N = len(EA) + 1  # Total matrix dimension
 
     for i in seq:
         low = mu_low[i]
@@ -38,8 +37,8 @@ def bifunc_relative(mu_low, mu_high, origins, epsilon, w, bsquare, EA, itermax_v
         origin = origins[i]
         max_it = int(itermax_vector[i])
 
-        # 预先计算 d_j - origin (Shifted Diagonals)
-        # 这是一个高精度操作，因为 d_j 和 origin 都是原始数据
+        # Precompute d_j - origin (Shifted Diagonals)
+        # This is a high-precision operation since d_j and origin are original data
         shifted_EA = EA - origin
 
         # alpha - origin (Shifted Tip)
@@ -50,51 +49,25 @@ def bifunc_relative(mu_low, mu_high, origins, epsilon, w, bsquare, EA, itermax_v
         mid = low
 
         while it < max_it:
-            # 二分中点 (在 mu 空间)
+            # Bisection midpoint (in mu space)
             mid = (low + high) / 2.0
 
-            # -----------------------------------------------------------------
-            # 1. 计算久期方程的值 f(mu)
-            # -----------------------------------------------------------------
-            # 我们需要计算: f(mu) = (w - origin - mu) + sum( z^2 / (d_j - origin - mu) )
-            # 注意: w 在方程中是 lambda - w... 即 (origin + mu) - w
-            # 所以项是: mu - (w - origin) + sum...
-
-            # 分母计算: (d_j - origin) - mu
-            # 当 d_j == origin 时，shifted_EA 为 0，分母精确为 -mu
-            # 当 d_j!= origin 时，shifted_EA 为大数，减去小数 mu 不损失精度
             denoms = shifted_EA - mid
-
-            # 避免除以零（极罕见情况，二分法通常不会直接命中极点）
-            # 在 numpy 中处理 inf
             with np.errstate(divide='ignore', invalid='ignore'):
                 terms = bsquare / denoms
-
-            # 久期方程值
-            # f(lambda) = lambda - w + sum(...)
-            # f(origin + mu) = (origin + mu) - w + sum(...)
-            #                = mu - (w - origin) + sum(...)
             f_val = mid - shifted_w + np.sum(terms)
 
             # -----------------------------------------------------------------
-            # 2. 计算 Gu-Eisenstat 停止准则的误差界 (Bound)
+            # Compute error bound for Gu-Eisenstat stopping criterion
             # -----------------------------------------------------------------
             # Bound = eta * N * ( |mu| + |w - origin| + sum( |terms| ) )
             sum_abs_terms = np.sum(np.abs(terms))
             bound = eta * N * (abs(mid) + abs(shifted_w) + sum_abs_terms)
-
-            # -----------------------------------------------------------------
-            # 3. 检查停止条件
-            # -----------------------------------------------------------------
             if abs(f_val) <= bound:
                 mu_roots[i] = mid
                 converged = True
                 break
 
-            # -----------------------------------------------------------------
-            # 4. 更新区间
-            # -----------------------------------------------------------------
-            # f(lambda) 在极点间单调递增
             if f_val > 0:
                 high = mid
             else:
@@ -109,31 +82,31 @@ def bifunc_relative(mu_low, mu_high, origins, epsilon, w, bsquare, EA, itermax_v
 
 def bifunc_relative_std(mu_low, mu_high, origins, epsilon, rho, z_square, EA, itermax_vector, seq):
     """
-    使用 Gu-Eisenstat 停止准则在相对坐标系下求解标准秩1更新的久期方程。
+    Solve the secular equation for standard rank-1 update in relative coordinate system using Gu-Eisenstat stopping criterion.
 
-    方程形式: f_std(λ) = 1 + ρ Σ |z_i|² / (λ_i - λ) = 0
+    Equation form: f_std(λ) = 1 + ρ Σ |z_i|² / (λ_i - λ) = 0
 
-    参数:
-    - mu_low, mu_high: 每个特征值的搜索区间 [low, high] (相对于 origins).
-    - origins: 每个特征值的参考原点 (Shift). 真根 = origins[i] + mu[i].
-    - epsilon: 机器精度.
-    - rho: 秩1更新的标量系数.
-    - z_square: 相互作用向量 z 的平方 (|z_i|²).
-    - EA: 对角元素 (λ_i).
-    - seq: 需要计算的特征值索引列表.
+    Parameters:
+    - mu_low, mu_high: Search intervals [low, high] for each eigenvalue (relative to origins).
+    - origins: Reference origins (Shift) for each eigenvalue. True root = origins[i] + mu[i].
+    - epsilon: Machine precision.
+    - rho: Scalar coefficient of rank-1 update.
+    - z_square: Squared interaction vector z (|z_i|²).
+    - EA: Diagonal elements (λ_i).
+    - seq: List of eigenvalue indices to compute.
 
-    返回:
-    - mu_roots: 计算出的偏移量 mu.
+    Returns:
+    - mu_roots: Computed offsets mu.
     """
 
-    # 初始化结果数组
+    # Initialize result array
     N_roots = len(mu_low)
     mu_roots = np.zeros(N_roots)
 
-    # 设定误差界限参数 eta (tr932 建议 eta * N < 0.1)
-    # 这里取 conservative 值以保证稳定性
+    # Set error bound parameter eta (tr932 suggests eta * N < 0.1)
+    # Using conservative value for stability
     eta = epsilon
-    N = len(EA)  # 矩阵总维度
+    N = len(EA)  # Total matrix dimension
 
     for i in seq:
         low = mu_low[i]
@@ -141,8 +114,8 @@ def bifunc_relative_std(mu_low, mu_high, origins, epsilon, rho, z_square, EA, it
         origin = origins[i]
         max_it = int(itermax_vector[i])
 
-        # 预先计算 λ_i - origin (Shifted Diagonals)
-        # 这是一个高精度操作，因为 λ_i 和 origin 都是原始数据
+        # Precompute λ_i - origin (Shifted Diagonals)
+        # This is a high-precision operation since λ_i and origin are original data
         shifted_EA = EA - origin
 
         it = 0
@@ -150,49 +123,29 @@ def bifunc_relative_std(mu_low, mu_high, origins, epsilon, rho, z_square, EA, it
         mid = low
 
         while it < max_it:
-            # 二分中点 (在 mu 空间)
+            # Bisection midpoint (in mu space)
             mid = (low + high) / 2.0
 
-            # -----------------------------------------------------------------
-            # 1. 计算久期方程的值 f(mu)
-            # -----------------------------------------------------------------
-            # 我们需要计算: f(mu) = 1 + ρ Σ |z_i|² / (λ_i - (origin + mu))
-            # 换元后: λ_i - (origin + mu) = (λ_i - origin) - mu = shifted_EA - mu
-
-            # 分母计算: (λ_i - origin) - mu
-            # 当 λ_i == origin 时，shifted_EA 为 0，分母精确为 -mu
-            # 当 λ_i != origin 时，shifted_EA 为大数，减去小数 mu 不损失精度
             denoms = shifted_EA - mid
 
-            # 避免除以零（极罕见情况，二分法通常不会直接命中极点）
-            # 在 numpy 中处理 inf
             with np.errstate(divide='ignore', invalid='ignore'):
                 terms = z_square / denoms
 
-            # 久期方程值
+            # Secular equation value
             f_val = 1.0 + rho * np.sum(terms)
 
             # -----------------------------------------------------------------
-            # 2. 计算 Gu-Eisenstat 停止准则的误差界 (Bound)
+            # Compute error bound for Gu-Eisenstat stopping criterion
             # -----------------------------------------------------------------
             # Bound = eta * N * ( |rho| * sum( |terms| ) )
             sum_abs_terms = np.sum(np.abs(terms))
             bound = eta * N * (np.abs(rho) * sum_abs_terms)
 
-            # -----------------------------------------------------------------
-            # 3. 检查停止条件
-            # -----------------------------------------------------------------
             if abs(f_val) <= bound:
                 mu_roots[i] = mid
                 converged = True
                 break
 
-            # -----------------------------------------------------------------
-            # 4. 更新区间
-            # -----------------------------------------------------------------
-            # f(λ) 在极点间的单调性取决于 rho 的符号
-            # 当 rho > 0 时，f(λ) 在每个区间内单调递增
-            # 当 rho < 0 时，f(λ) 在每个区间内单调递减
             if rho > 0:
                 if f_val > 0:
                     high = mid
@@ -211,24 +164,21 @@ def bifunc_relative_std(mu_low, mu_high, origins, epsilon, rho, z_square, EA, it
 
     return mu_roots
 
-# -------------------------------------------------------------------------
-# 为了保持兼容性，我们可以保留旧接口的壳，但强烈建议直接使用新接口
-# -------------------------------------------------------------------------
-def bifunc_vector_gu(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA, itermax_vector, root, seq,config):
+
+def bifunc_vector_gu(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA, itermax_vector, root, seq, config):
     """
-    旧接口的适配器。如果外部代码强行调用此函数，
-    我们将其转换为相对坐标调用以保证精度。
+    Vectorized bisection method for root finding with gu stopping criterion
     """
     N = len(root)
     origins = np.zeros(N)
     mu_low = np.zeros(N)
     mu_high = np.zeros(N)
 
-    # 简单的原点选择策略：选择区间中点最近的极点
-    # 注意：这不如 evd.py 中的智能选择策略好，但作为兼容层够用了
+    # Simple origin selection strategy: choose the pole closest to the interval midpoint
+    # Note: This is not as good as the intelligent selection strategy in evd.py, but sufficient as a compatibility layer
     for i in seq:
         mid_abs = (rt_left[i] + rt_right[i]) / 2.0
-        # 寻找最近的极点作为原点
+        # Find the closest pole as origin
         dist = np.abs(EA - mid_abs)
         idx = np.argmin(dist)
         origins[i] = EA[idx]
@@ -241,18 +191,18 @@ def bifunc_vector_gu(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA, itermax
         mus = bifunc_relative_std(mu_low, mu_high, origins, epsilon, w, bsquare, EA, itermax_vector, seq)
     else:
         raise error
-    # 返回真根
+    # Return true roots
     for i in seq:
         root[i] = origins[i] + mus[i]
 
-def bifunc(func, left, right, error, w, bsquare, eigenvalue,i,itermax):
+def bifunc(func, left, right, error, w, bsquare, eigenvalue, i, itermax):
     """
     Single-variable bisection method for root finding
     """
     mid = (left + right) / 2
     iter_ = 0
     # Evaluate function at the left endpoint
-    f_left = func(left, w, bsquare, eigenvalue, left, right,i)
+    f_left = func(left, w, bsquare, eigenvalue, left, right, i)
 
     # Get machine epsilon for double precision
     eps = np.finfo(float).eps
@@ -268,7 +218,7 @@ def bifunc(func, left, right, error, w, bsquare, eigenvalue,i,itermax):
             break
 
         iter_ += 1
-        f_mid = func(mid, w, bsquare, eigenvalue, left, right,i)
+        f_mid = func(mid, w, bsquare, eigenvalue, left, right, i)
         tmp = f_left * f_mid
         if  tmp < 0:
             right = mid
@@ -283,8 +233,10 @@ def bifunc(func, left, right, error, w, bsquare, eigenvalue,i,itermax):
     return root
 
 
-
-def bifunc_vector_std(func, left, right, error, w, bsquare, eigenvalue,itermax, root,seq):
+def bifunc_vector_std(func, left, right, error, w, bsquare, eigenvalue, itermax, root, seq):
+    """
+    Vectorized bisection method for root finding with standard stopping criterion
+    """
     mid = (left + right) / 2
     N = left.size
     f_left = np.zeros(N)
@@ -292,7 +244,7 @@ def bifunc_vector_std(func, left, right, error, w, bsquare, eigenvalue,itermax, 
     tmp = np.zeros(N)
     # Evaluate function at the left endpoint
     for i in range(N):
-        f_left[i] = func(left[i], w, bsquare, eigenvalue, left[i], right[i],seq[i])
+        f_left[i] = func(left[i], w, bsquare, eigenvalue, left[i], right[i], seq[i])
 
     # Get machine epsilon for double precision
     eps = np.finfo(float).eps
@@ -320,7 +272,7 @@ def bifunc_vector_std(func, left, right, error, w, bsquare, eigenvalue,itermax, 
 
             iter_ += 1
             for i in range(begin,end):
-                f_mid[i] = func(mid[i], w, bsquare, eigenvalue, left[i], right[i],seq[i])
+                f_mid[i] = func(mid[i], w, bsquare, eigenvalue, left[i], right[i], seq[i])
             tmp[begin:end] = f_left[begin:end] * f_mid[begin:end]
             for i in range(begin,end):
                 if  tmp[i] < 0:
@@ -421,7 +373,7 @@ def bifunc_vector_muti(func, lleft, rright, error, w, bsquare, eigenvalue, iterm
         root[i] = mid[i]
 
 
-def bifunc_vector_muti2(func, lleft, rright, error, w, bsquare, eigenvalue,itermax, root):
+def bifunc_vector_muti2(func, lleft, rright, error, w, bsquare, eigenvalue, itermax, root):
     """
     Parallel vectorized bisection method for root finding (multi-threaded)
     """

@@ -1,9 +1,0 @@
-# 目标类型：
-# - standard_rank1: 标准秩1问题（使用 bifunc_relative_std 函数）
-# - incremental_rank1: 增广秩1问题（使用 bifunc_relative 函数）
-target_type: standard_rank1
-
-# 停止准则：
-# - std: 经典二分法（基于区间长度 |b - a| ≤ 2εmax(1, |a|, |b|)）
-# - gu: Gu-Eisenstat方法（基于函数值 |g(μ)| ≤ ε(1 + sum_terms)）
-stop_criterion: gu

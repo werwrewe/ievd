@@ -1,6 +1,11 @@
 import numpy as np
 
 def cpfunc(lmbda, w, bb, eigenvalue,left,right,i):
+    """
+    Incremental Secular Equation
+    Used for Standard Rank-1 Update.
+    """
+
     if i % 2 == 1:
         if lmbda == left:
             return -1
@@ -29,13 +34,8 @@ def cpfunc2(lmbda, w, bb, eigenvalue,left,right,i):
 
 def cpfunc_standard(lmbda, rho, bb, eigenvalue, left, right, i):
     """
-    Standard Secular Equation: f(lambda) = 1 + rho * sum( z_i^2 / (d_i - lambda) )
+    Standard Secular Equation
     Used for Standard Rank-1 Update.
-
-    Params:
-        rho: The scalar rho in A + rho*u*u^H. (Passed via 'w' in bisection)
-        bb: Squared components of z vector (z_i^2).
-        eigenvalue: The old eigenvalues d_i.
     """
     # Boundary handling to help bisection determine signs
     # For standard update (rho > 0), function is increasing.
