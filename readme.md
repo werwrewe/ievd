@@ -22,7 +22,7 @@ The project supports multiple matrix generation modes (specified via the mode pa
 ## Performance Evaluation
 The project evaluates the following metrics:
 
-- Computation Time : Execution time of IEVD and standard EIG methods
+- Computation Time : Execution time of IEVD and dsyevd methods
 - Residual : ||B - QB * EB * QB^T|| / (||B|| * N)
 - Orthogonality : ||QB * QB^T - I|| / N
 - Eigenvalue Error : ||EB - EB_|| / N , where EB_ is the result from the dsyevd function
