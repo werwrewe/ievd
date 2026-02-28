@@ -4,14 +4,13 @@ IEVD is a Python implementation for efficiently computing rank-1 modification ei
 
 ## Core Features
 - Two Rank-1 Update Types :
-  - Standard rank-1 update (standard_rank1)
-  - Incremental rank-1 update (incremental_rank1)
-# - standard_rank1: Standard rank-1 problem
-# - incremental_rank1: Incremental rank-1 problem 
+  - Standard rank-1 update
+  - Incremental rank-1 update
 
 - Two Stopping Criteria :
   - Classical bisection method (std)
   - Gu-Eisenstat method (gu)
+
 # - std: Classical bisection (based on interval length |b - a| ≤ 2εmax(1, |a|, |b|))
 # - gu: Gu-Eisenstat method (based on function value |f(μ)| ≤ ε(1 + sum_terms))
 
