@@ -50,7 +50,7 @@ f(μ) = w - μ - Σ β_i² / (λ_i - μ) = 0
 | `evaluation.py` | Error metrics — residual, orthogonality |
 | `config.yaml` | Configuration — `target_type`, `stop_criterion` |
 
-## Deflation
+## Deflation (large time complexity)
 
 Implements the paper's complete deflation method with two phases:
 
