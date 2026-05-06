@@ -147,7 +147,7 @@ def batchNtest(th,config,mode=2):
     '''
     # N = [1000]
     all_results = []
-    N = [500,1000,2500,5000,7500,10000,15000,20000]
+    N = [500,5000,10000]
     for n in N:
         results = batchtest(n,th,config,mode=mode)
         all_results.extend(results)

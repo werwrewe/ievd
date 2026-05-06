@@ -9,9 +9,9 @@ def load_config(config_path='ievd/config.yaml'):
         return yaml.safe_load(f)
 
 if __name__ == '__main__':
-    config = load_config('ievd/config.yaml')
+    config = load_config('config.yaml')
     all_data = []
-    for mode in [0,1,2,3,4,5,6]:
+    for mode in range(6):
         print('\n mode=',mode)
 
         df = batchNtest(th,config=config,mode=mode)

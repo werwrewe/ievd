@@ -1,15 +1,11 @@
 # %%%%% eigensolver %%%%%%
 from os import error
 import numpy as np
+import time
 from func import *
 from bisection import *
-from deflation import *
+from deflation import deflate_incremental, deflate_standard, deflation_tol
 from tools import *
-import time
-
-import numpy as np
-import time
-from bisection import bifunc_relative
 
 
 def evd_of_C(EA, beta, w, N, config):
@@ -55,7 +51,6 @@ def evd_of_C(EA, beta, w, N, config):
     for i in range(N + 1):
         if update4value[i] == 0:
             seq.append(i)
-            # Calculate the margin of the current interval by subtracting a small value proportional to the machine epsilon
             left_margin = rt_interval[i] - np.finfo(float).eps * abs(rt_interval[i])
             right_margin = rt_interval[i+1] + np.finfo(float).eps * abs(rt_interval[i+1])
             rt_left.append(left_margin)
@@ -63,19 +58,13 @@ def evd_of_C(EA, beta, w, N, config):
     rt_left = np.array(rt_left)
     rt_right = np.array(rt_right)
     root = np.zeros(N+1)
-    #print('rt_left=',rt_left)
     itermax_vector = np.log2(rt_right - rt_left) - np.log2(epsilon) + 1000
-    # print('itermax_vector=',itermax_vector)
-    #itermax = np.linalg.norm(x = itermax_vector,ord = np.Inf)
     if config['stop_criterion'] == 'gu':
         bifunc_vector_gu(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA,itermax_vector, root, seq,config)
     elif config['stop_criterion'] == 'std':
         bifunc_vector_std(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA,itermax_vector, root, seq)
     else:
         raise error
-    # bifunc_vector_muti(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA,itermax_vector, root)
-    #bifunc_vector(cpfunc, rt_left, rt_right, epsilon, w, bsquare, EA,itermax, root)
-    #print('root=',root)
     count = 0
     i = 0
     while i<=N:
@@ -86,20 +75,14 @@ def evd_of_C(EA, beta, w, N, config):
 
     time1 = time.perf_counter()
     time_eig = time1 - time0
-    #print(f'compute eigenvalue of C: {time_eig:.4e}')
     #recompute beta
-    #print('C_eigenvector1\n',C_eigenvector)
-    # beta = compute_beta(np.diag(C_eigenvalue), EA, N, beta,update4value)
     beta = compute_beta_matrix(root, EA, beta)
-    #print('C_eigenvector2\n',C_eigenvector)
     time2 = time.perf_counter()
     time_rebeta = time2 - time1
     C_eigenvector = construct_eigenvectors_matrix(beta,EA,root)
 
     time3 = time.perf_counter()
     time_eigv = time3 - time2
-    #print(f'compute eigenvectors of C: {time_eigv:.4e}')
-    #compute eigenvalue and eigenvectors of B
     return C_eigenvector,C_eigenvalue
 
 
@@ -127,34 +110,62 @@ def evd_of_B(QA, C_eigenvector, C_eigenvalue, N):
 def evd(QA, EA, Alpha, w, N, config):
     """
     Main Entry Point for Incremental Eigenvalue Decomposition.
-    Target: B = A + w * Alpha * Alpha^T, where A = QA * EA * QA^T
+    Target: B = [[A, Alpha], [Alpha^T, w]], where A = QA * EA * QA^T
 
     Steps:
     1. Compute beta = QA^T * Alpha
-    2. Construct arrowhead matrix
-    3. Deflate the problem to reduce size
-    4. Solve the reduced eigenvalue problem
-    5. Rearrange results if deflation was applied
-    6. Compute final eigenvalues and eigenvectors of B
+    2. Deflate the arrowhead problem to reduce size
+    3. Solve the reduced secular equation
+    4. Recover full eigenvectors using V_defl
+    5. Compute final eigenvalues and eigenvectors of B
     """
     beta = QA.T @ Alpha
-    Arrow_Matrix = np.block([[EA, beta], [beta.T, w]])
-    tau = 0.2
-    N = N + 1
-    H, deleted_indices, eigenvalues1, eigenvectors1, N_small, identity_matrix = deflate_matrix(Arrow_Matrix, tau)
-    EA_samll, beta_small, w_small = np.diag(np.diag(H[:N_small-1, :N_small-1])), H[:N_small-1, N_small-1], np.array(H[N_small-1, N_small-1])
-    try:
-        beta_small = beta_small.reshape(N_small-1,)
-    except:
-        beta_small = beta_small
+    EA_diag = np.diag(EA).copy()
 
-    if len(EA_samll) != 0:
-        C_eigenvector, C_eigenvalue = evd_of_C(EA_samll, beta_small, w_small, N_small-1, config)
-        eigenvalues2, eigenvectors2 = C_eigenvalue, identity_matrix @ C_eigenvector
-        C_eigenvalue, C_eigenvector = rearrange2(deleted_indices, eigenvalues1, eigenvectors1, eigenvalues2, eigenvectors2)
+    # --- Deflation ---
+    EA_sub, beta_sub, w_sub, V_defl, deflated_evals, deflated_indices = \
+        deflate_incremental(EA_diag, beta.flatten(), w)
+
+    n_total = N + 1  # total arrowhead matrix size
+    n_sub = len(EA_sub)
+
+    if n_sub > 0:
+        C_evec_sub, C_eval_sub = evd_of_C(
+            np.diag(EA_sub), beta_sub, float(w_sub), n_sub, config
+        )
     else:
-        C_eigenvalue, C_eigenvector = np.diag(np.append(np.diag(eigenvalues1), w_small)), np.eye(eigenvectors1.shape[0]+1)
-    QB, EB = evd_of_B(QA, C_eigenvector, C_eigenvalue, N-1)
+        C_evec_sub = np.ones((1, 1))
+        C_eval_sub = np.array([[float(w_sub)]])
+
+    # --- Recover full eigenvectors using V_defl ---
+    # Paper: Q_C = V_defl @ block_diag(Q_sub, I_defl)
+    remaining_indices = [i for i in range(n_total) if i not in deflated_indices]
+
+    # Build a combined sorted list to determine correct global ordering
+    combined = []
+    for i, idx in enumerate(deflated_indices):
+        combined.append((deflated_evals[i], True, i, idx))
+    for i, idx in enumerate(remaining_indices):
+        combined.append((np.diag(C_eval_sub)[i], False, i, idx))
+    combined.sort(key=lambda x: x[0])
+
+    Q_block = np.zeros((n_total, n_total))
+    C_eigenvalue = np.zeros((n_total, n_total))
+
+    for j_sorted, (val, is_deflated, src_idx, global_idx) in enumerate(combined):
+        C_eigenvalue[j_sorted, j_sorted] = val
+        if is_deflated:
+            Q_block[global_idx, j_sorted] = 1.0
+        else:
+            row_ptr = 0
+            for r in range(n_total):
+                if r not in deflated_indices:
+                    Q_block[r, j_sorted] = C_evec_sub[row_ptr, src_idx]
+                    row_ptr += 1
+
+    C_eigenvector = V_defl @ Q_block
+
+    QB, EB = evd_of_B(QA, C_eigenvector, C_eigenvalue, N)
     return QB, EB
 
 
@@ -165,13 +176,13 @@ def evd_of_C_standard(EA, z, rho, N, config):
 
     Steps:
     1. Determine search intervals using interlacing property
-    2. Set up bisection method with dynamic error tolerance
-    3. Solve secular equation using bisection
+    2. Detect near-degenerate intervals (multiple close poles in one interval)
+       and handle them directly
+    3. Solve remaining intervals via bisection
     4. Recompute z vector for stability (Gu-Eisenstat method)
     5. Construct eigenvectors using the formula: v_i = z / (D - lambda_i)
     """
     z_square = z**2
-
 
     rt_interval = np.zeros(N + 1)
 
@@ -208,7 +219,7 @@ def evd_of_C_standard(EA, z, rho, N, config):
 
     C_eigenvalue = np.diag(root)
 
-    update4value = np.zeros(N) # No locked values
+    update4value = np.zeros(N)
     z_recomputed = compute_z(root, EA, N, rho, z, update4value)
 
     C_eigenvector = construct_eigenvectors_standard(z_recomputed, EA, root)
@@ -218,72 +229,66 @@ def evd_of_C_standard(EA, z, rho, N, config):
 def evd_standard(QA, EA, u, rho, config):
     """
     Main Entry Point for Standard Rank-1 Update EVD.
-    Target: A_new = A + rho * u * u^H
-    Known: A = QA * EA * QA^H
+    Target: A_new = A + rho * u * u^T
+    Known: A = QA * EA * QA^T
 
     Steps:
-    1. Project u to z = QA^H * u
+    1. Project u to z = QA^T * u
     2. Deflate problem (D + rho * z * z^T)
     3. Solve secular equation
-    4. Recover eigenvectors
+    4. Recover eigenvectors via U_defl
     """
     N = len(EA)
-    EA = np.diag(EA)
+    EA_diag = np.diag(EA).copy()
     z = QA.T @ u
-
     z = z.flatten()
-    EA_small, z_small, deleted_indices, deflated_vals, perm_idx = deflate_standard(EA, z, rho)
 
-    N_small = len(EA_small)
+    # --- Deflation ---
+    EA_sub, z_sub, rho_sub, U_defl, deflated_evals, deflated_indices = \
+        deflate_standard(EA_diag, z, rho)
 
-    if N_small > 0:
-        C_evec_small, C_eval_small = evd_of_C_standard(EA_small, z_small, rho, N_small, config)
+    n_sub = len(EA_sub)
 
-        # Extract diagonal eigenvalues
-        solved_vals = np.diag(C_eval_small)
-        solved_vecs = C_evec_small
+    if n_sub > 0:
+        C_evec_sub, C_eval_sub = evd_of_C_standard(EA_sub, z_sub, rho, n_sub, config)
+        solved_vals = np.diag(C_eval_sub)
+        solved_vecs = C_evec_sub
     else:
-        solved_vals = np.array()
+        solved_vals = np.array([])
         solved_vecs = np.zeros((0, 0))
 
-    # Combine values
+    # --- Recover full eigenvectors using U_defl ---
+    # Paper: Q_D = U_defl @ block_diag(Q_sub, I_defl)
+    remaining_indices = [i for i in range(N) if i not in deflated_indices]
+
+    # Build a combined sorted list to determine correct global ordering
+    # Each entry: (eigenvalue, is_deflated, source_index, global_index_in_unsorted_D)
+    combined = []
+    for i, idx in enumerate(deflated_indices):
+        combined.append((deflated_evals[i], True, i, idx))
+    for i, idx in enumerate(remaining_indices):
+        combined.append((solved_vals[i], False, i, idx))
+    combined.sort(key=lambda x: x[0])
+
+    Q_block = np.zeros((N, N))
     final_evals = np.zeros(N)
-    final_evecs_in_D_basis = np.zeros((N, N))
 
-    # Pointer for small array
-    ptr_small = 0
-    # Pointer for deflated array
-    ptr_defl = 0
-
-    # Current sorted order is perm_idx.
-    # deleted_indices refers to positions in the SORTED arrays.
-
-    for i in range(N):
-        if i in deleted_indices:
-            final_evals[i] = deflated_vals[ptr_defl]
-            final_evecs_in_D_basis[i, i] = 1.0 # Standard unit vector
-            ptr_defl += 1
+    for j_sorted, (val, is_deflated, src_idx, global_idx) in enumerate(combined):
+        final_evals[j_sorted] = val
+        if is_deflated:
+            # Unit vector e_{global_idx} at column j_sorted
+            Q_block[global_idx, j_sorted] = 1.0
         else:
-            final_evals[i] = solved_vals[ptr_small]
-            # Map the small eigenvector column to the correct rows
-            # Rows corresponding to deleted_indices are 0
-            # Rows corresponding to remaining are from solved_vecs
-
-            # Map rows
+            # Place src_idx-th column of solved_vecs into undeflated rows, column j_sorted
             row_ptr = 0
             for r in range(N):
-                if r not in deleted_indices:
-                    final_evecs_in_D_basis[r, i] = solved_vecs[row_ptr, ptr_small]
+                if r not in deflated_indices:
+                    Q_block[r, j_sorted] = solved_vecs[row_ptr, src_idx]
                     row_ptr += 1
-                else:
-                    final_evecs_in_D_basis[r, i] = 0.0
 
-            ptr_small += 1
+    final_evecs_in_D_basis = U_defl @ Q_block
 
-    QA_sorted = QA[:, perm_idx]
+    # Transform from D basis to original basis using QA
+    QB = QA @ final_evecs_in_D_basis
 
-    # QB = QA_sorted * Final_Evecs_in_D_basis
-    QB = QA_sorted @ final_evecs_in_D_basis
-
-    # Return as diagonal matrix and matrix
     return QB, np.diag(final_evals)
